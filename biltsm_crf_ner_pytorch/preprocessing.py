@@ -7,9 +7,9 @@ import torch.optim as optim
 
 from seqeval.metrics import precision_score, recall_score, f1_score
 
-from src.dataloader import Vocabulary, filter_embeddings
-from src.trainer import Trainer
-from src.models import BiLSTMCRF
+from biltsm_crf_ner_pytorch.src import Vocabulary, filter_embeddings
+from biltsm_crf_ner_pytorch.src import Trainer
+from biltsm_crf_ner_pytorch.src import BiLSTMCRF
 
 
 class IndexTransformer(BaseEstimator, TransformerMixin):

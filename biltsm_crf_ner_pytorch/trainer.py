@@ -3,7 +3,7 @@ import time
 from tqdm import tqdm
 from seqeval.metrics import precision_score, recall_score, f1_score
 
-from src.dataloader import NERSequence
+from biltsm_crf_ner_pytorch.src import NERSequence
 
 
 class Trainer(object):

@@ -1,10 +1,10 @@
-from src.dataloader import DataLoader
-from src.preprocessing import Sequence
+from biltsm_crf_ner_pytorch.src import DataLoader
+from biltsm_crf_ner_pytorch.src import Sequence
 
 if __name__ == '__main__':
-    chemdner_train_link = '../chemdner/full_type_data/conllform/train_conllform.txt'
-    chemdner_dev_link = '../chemdner/full_type_data/conllform/valid_conllform.txt'
-    chemdner_test_link = '../chemdner/full_type_data/conllform/test_conllform.txt'
+    chemdner_train_link = '../datasets/full_type_data/conllform/train_conllform.txt'
+    chemdner_dev_link = '../datasets/full_type_data/conllform/valid_conllform.txt'
+    chemdner_test_link = '../datasets/full_type_data/conllform/test_conllform.txt'
 
     leader = DataLoader(anno_format='conll')
 

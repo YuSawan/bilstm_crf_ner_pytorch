@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from src.utils import argmax, log_sum_exp
+from biltsm_crf_ner_pytorch.src import argmax, log_sum_exp
 
 
 class BiLSTMCRF(nn.Module):
