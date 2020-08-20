@@ -1,5 +1,5 @@
 import numpy as np
-from sklearn.externals import joblib
+import joblib
 from sklearn.base import BaseEstimator, TransformerMixin
 from torch.nn.utils.rnn import pad_sequence
 import torch
@@ -7,9 +7,9 @@ import torch.optim as optim
 
 from seqeval.metrics import precision_score, recall_score, f1_score
 
-from biltsm_crf_ner_pytorch.src import Vocabulary, filter_embeddings
-from biltsm_crf_ner_pytorch.src import Trainer
-from biltsm_crf_ner_pytorch.src import BiLSTMCRF
+from biltsm_crf_ner_pytorch.dataloader import Vocabulary, filter_embeddings
+from biltsm_crf_ner_pytorch.trainer import Trainer
+from biltsm_crf_ner_pytorch.models import BiLSTMCRF
 
 
 class IndexTransformer(BaseEstimator, TransformerMixin):
@@ -189,12 +189,12 @@ class Sequence(object):
         else:
             raise OSError('Could not find a model. Call load(dir_path).')
             
-    def analyze(self, text, tokenizer=str.split):
-        if not self.tagger:
-            self.tagger = Tagger(self.model,
-                                preprocessor=self.p,
-                                tokenizer=tokenizer)
-        return self.tagger.analyze(text)
+    #def analyze(self, text, tokenizer=str.split):
+    #    if not self.tagger:
+    #        self.tagger = Tagger(self.model,
+    #                            preprocessor=self.p,
+    #                            tokenizer=tokenizer)
+    #    return self.tagger.analyze(text)
     
     def save(self, weights_file, param_file, preprocessor_file):
         self.p.save(preprocessor_file)

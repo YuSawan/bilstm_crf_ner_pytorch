@@ -1,13 +1,12 @@
 # Load Library
 import math
-import os
 from collections import Counter
 import random
 
 import numpy as np
-import torch
+import torch.utils.data as data
 
-class NERSequence(torch.utils.data.Dataset):
+class NERSequence(data.Dataset):
 
     def __init__(self, x, y, batch_size=1, preprocess=None, shuffle=False):
         self.x = x
@@ -30,6 +29,39 @@ class NERSequence(torch.utils.data.Dataset):
         return math.ceil(len(self.x) / self.batch_size)
 
 
+def load_conll(path, encode):
+    sentences, labels = [], []
+    words, tags = [], []
+    with open(path, encoding=encode) as f:
+        for line in f:
+            line = line.rstrip()
+            if line:
+                word, tag = line.split(' ')
+                words.append(word)
+                tags.append(tag)
+            else:
+                sentences.append(words)
+                labels.append(tags)
+                words, tags = [], []
+
+    return sentences, labels
+
+'''
+def load_brat(path, encode):
+    sents, labels = [], []
+    words, tags = [], []
+    # with open(self.path, encoding=self.encode) as f:
+
+    return sents, labels
+
+def load_pubchem(path, encode):
+    sents, labels = [], []
+    words, tags = [], []
+    # with open(self.path, encoding=self.encode) as f:
+
+    return sents, labels
+'''
+
 class DataLoader:
     def __init__(self, anno_format):
         assert anno_format in ['conll', 'brat', 'pubchem'], "The Annotation Format Does Not Correspond This Format"
@@ -38,44 +70,15 @@ class DataLoader:
     def load_data(self, path, encode='utf-8'):
         assert path is not None, "The Data Path Is Not Allow Empty"
         if self.format == 'conll':
-            sents, labels = self._load_conll(path, encode)
-        elif self.format == 'brat':
-            sents, labels = self._load_brat(path, encode)
-        else: # <- 'pubchem'
-            sents, labels = self._load_pubchem(path, encode)
+            sentences, labels = load_conll(path, encode)
+        #elif self.format == 'brat':
+        #    sentences, labels = load_brat(path, encode)
+        #else: # <- 'pubchem'
+        #    sentences, labels = load_pubchem(path, encode)
+        else:
+            sentences, labels = [], []
             
-        return sents, labels
-    
-    def _load_conll(self, path, encode):
-        sents, labels = [], []
-        words, tags = [], []
-        with open(path, encoding=encode) as f:
-            for line in f:
-                line = line.rstrip()
-                if line:
-                    word, tag = line.split(' ')
-                    words.append(word)
-                    tags.append(tag)
-                else:
-                    sents.append(words)
-                    labels.append(tags)
-                    words, tags = [], []
-                    
-        return sents, labels
-        
-    def _load_brat(self, path, encode):
-        sents, labels = [], []
-        words, tags = [], []
-        #with open(self.path, encoding=self.encode) as f:
-            
-        return sents, labels
-        
-    def _load_pubchem(self, path, encode):
-        sents, labels = [], []
-        words, tags = [], []
-        #with open(self.path, encoding=self.encode) as f:
-        
-        return sents, labels
+        return sentences, labels
 
 
 class Vocabulary(object):
@@ -151,7 +154,7 @@ def filter_embeddings(embeddings, vocab, dim):
     return _embeddings
 
 
-def load_glove(file):
+def load_glove(file, model):
     with open(file, encoding='utf8', errors='ignore') as f:
         for line in f:
             line = line.split(' ')
