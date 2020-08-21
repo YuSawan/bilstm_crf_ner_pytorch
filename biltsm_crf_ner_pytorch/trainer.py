@@ -2,9 +2,11 @@ import torch
 import time
 from tqdm import tqdm
 from seqeval.metrics import precision_score, recall_score, f1_score
+from logging import getLogger
 
 from biltsm_crf_ner_pytorch.dataloader import NERSequence
 
+logger = getLogger()
 
 class Trainer(object):
     
@@ -14,7 +16,7 @@ class Trainer(object):
         self.preprocessor = preprocessor
         self.use_char = use_char
         self._gpu = gpu
-        
+
     def train(self, x_train, y_train, x_valid=None, y_valid=None,
              epochs=150, batch_size=32, shuffle=True):
         
@@ -26,7 +28,6 @@ class Trainer(object):
             batch_valid = NERSequence(x_valid, y_valid, batch_size=batch_size, 
                                       preprocess=self.preprocessor.transform, shuffle=shuffle)
 
-            
         #Check prediction before training
         with torch.no_grad():
             if self.use_char:
@@ -42,11 +43,16 @@ class Trainer(object):
                     precheck_y = precheck_y.cuda()
                 
             print(self.model.neg_log_likelihood(precheck_x, precheck_y, char_sequence=precheck_x_char))
-        
 
+        self.model.train()
         start_at = time.time()
-        best_loss = 100000
-        
+        best_loss = 1e+12
+
+        for epoch in range(epochs):
+            logger.info(f"Epochs: {epoch}")
+            loss_list = list()
+
+
         if self.use_char:
             for epoch in range(epochs):
                 loss_epoch = 0

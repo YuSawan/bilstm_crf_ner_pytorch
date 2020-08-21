@@ -8,7 +8,10 @@ def prepare_sequence(seq, to_ix):
     idxs = [to_ix[w] for w in seq]
     return torch.tensor(idxs, dtype=torch.long)
 
-def log_sum_exp(vec):
-    max_score = vec[0, argmax(vec)]
-    max_score_broadcast = max_score.view(1, -1).expand(1, vec.size()[1])
-    return max_score + torch.log(torch.sum(torch.exp(vec - max_score_broadcast)))
+def log_sum_exp(tensor, dim=-1, keepdim=False):
+    max_score = tensor.max(dim, keepdim=keepdim)
+    if keepdim:
+        stable_vec = tensor - max_score
+    else:
+        stable_vec = tensor - max_score.unsqueeze(dim)
+    return max_score + (stable_vec.exp().sum(dim, keepdim=keepdim)).log()

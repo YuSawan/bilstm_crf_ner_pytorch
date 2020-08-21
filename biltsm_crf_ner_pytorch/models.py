@@ -30,12 +30,12 @@ class Model(nn.Module)
         self.initial_vocab = initial_vocab
 
         if use_char:
-            self.char_embedder = charLSTM(char_embedding_dim=self._char_embedding_dim,
-                                          char_lstm_hidden_size=self._char_lstm_hidden_size,
-                                          dropout=self._dropout)
+            self.char_embedder = charLSTM(self._char_embedding_dim, self._char_lstm_hidden_size, self._dropout)
             self._word_embedding_dim += char_embedding_dim * 2
 
-        self.seq_encoder = BiLSTM(num_labels=self._num_labels, vocab_size=self.,
+        self.seq_encoder = BiLSTM(num_labels=self._num_labels, vocab_size=self.p.vocab_size,
                                   embedding_dim=self._word_embedding_dim, lstm_hidden_size=self._word_lstm_hidden_size,
                                   dropout=self._dropout, embeddings=self._pretrained_embeddings)
         self.tagger = CRF(num_labels=self._num_labels)
+
+    def forward(self, batch):
