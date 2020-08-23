@@ -1,21 +1,15 @@
 import numpy as np
 import joblib
 from sklearn.base import BaseEstimator, TransformerMixin
-from torch.nn.utils.rnn import pad_sequence
 import torch
-import torch.optim as optim
 
-from seqeval.metrics import precision_score, recall_score, f1_score
 
-from biltsm_crf_ner_pytorch.dataloader import Vocabulary, filter_embeddings
-from biltsm_crf_ner_pytorch.trainer import Trainer
-from biltsm_crf_ner_pytorch.models import BiLSTMCRF
+from bilstm_crf_ner_pytorch.dataloader import Vocabulary
 
 
 class IndexTransformer(BaseEstimator, TransformerMixin):
     
-    def __init__(self, lower=True, num_norm=True,
-                use_char=True, initial_vocab=None):
+    def __init__(self, lower=True, num_norm=True, use_char=True, initial_vocab=None):
         self._num_norm = num_norm
         self._use_char = use_char
         self._word_vocab = Vocabulary(lower=lower)
@@ -40,30 +34,19 @@ class IndexTransformer(BaseEstimator, TransformerMixin):
         return self
         
     def transform(self, X, y=None):
-        word_ids = [torch.from_numpy(np.array(self._word_vocab.doc2id(doc))) for doc in X]
-        word_ids = pad_sequence(word_ids, batch_first=True)
-        
-        if self._use_char:
-            char_ids = [[self._char_vocab.doc2id(w) for w in doc] for doc in X]
-            char_ids = pad_nested_sequences(char_ids)
-            features = [word_ids, char_ids]
-        else:
-            features = word_ids
-        
+        X = [self._word_vocab.doc2id(doc) for doc in X]
+
         if y is not None:
-            y = [torch.from_numpy(np.array(self._label_vocab.doc2id(doc))) for doc in y]
-            y = pad_sequence(y, batch_first=True)
-            #y = np.eye(self.label_size, dtype='uint8')[y]            
-            #y = y if len(y.shape) == 3 else np.expand_dims(y, axis=0)
-            return features, y
+            y = [self._label_vocab.doc2id(doc) for doc in y]
+            return X, y
         else:
-            return features
+            return X
         
     def fit_transform(self, X, y=None, **params):
         return self.fit(X, y).transform(X, y)
     
     def inverse_transform(self, y, lengths=None):
-        y = np.argmax(y, -1)
+        print(y)
         inverse_y = [self._label_vocab.id2doc(ids) for ids in y]
         if lengths is not None:
             inverse_y = [iy[:l] for iy, l in zip(inverse_y, lengths)]
@@ -106,4 +89,3 @@ def pad_nested_sequences(sequences, dtype='int64'):
             x[i, j, :len(word)] = word
             
     return torch.from_numpy(x)
-

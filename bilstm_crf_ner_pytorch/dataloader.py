@@ -3,30 +3,66 @@ import math
 from collections import Counter
 import random
 
+import torch
 import numpy as np
 import torch.utils.data as data
 
 class NERSequence(data.Dataset):
 
-    def __init__(self, x, y, batch_size=1, preprocess=None, shuffle=False):
+    def __init__(self, x, y, batch_size=1, preprocess=None):
         self.x = x
         self.y = y
         self.batch_size = batch_size
         self.preprocess = preprocess
-        
-        if shuffle:
-            x_y = list(zip(self.x, self.y))
-            random.shuffle(x_y)
-            self.x, self.y = zip(*x_y)
+
         
     def __getitem__(self, idx):
-        batch_x = self.x[idx * self.batch_size: (idx + 1) * self.batch_size]
-        batch_y = self.y[idx * self.batch_size: (idx + 1) * self.batch_size]
+        #batch_x = self.x[idx * self.batch_size: (idx + 1) * self.batch_size]
+        #batch_y = self.y[idx * self.batch_size: (idx + 1) * self.batch_size]
         
-        return self.preprocess(batch_x, batch_y)
+        return self.x[idx], self.y[idx]
     
     def __len__(self):
         return math.ceil(len(self.x) / self.batch_size)
+
+class Dataset(data.Dataset):
+
+    def __init__(self, text, label):
+        self.text = text
+        self.label = label
+        self.num_data = len(label)
+
+    def __getitem__(self, idx):
+        return self.text[idx], self.label[idx]
+
+    def __len__(self):
+        return self.num_data
+
+
+def collate_fn(data):
+
+    def _merge_text(texts, labels):
+        lengths = [len(s) for s in texts]
+        padded_texts = torch.zeros(len(lengths), max(lengths)).long()
+        padded_labels = torch.zeros(len(lengths), max(lengths)).long()
+        for i, (text, label) in enumerate(zip(texts, labels)):
+            end = lengths[i]
+            padded_texts[i, :end] = torch.LongTensor(text[:end])
+            padded_labels[i, :end] = torch.LongTensor(label[:end])
+        return padded_texts, padded_labels, lengths
+
+    # Reshape items
+    texts, labels = zip(*data)
+    # Convert to tensor
+    padded_texts, padded_labels, lengths = _merge_text(texts, labels)
+
+    # Sort by the sentence length to feed in pack_padded_sequence
+    lengths, sort_index = torch.sort(torch.LongTensor(lengths), dim=0, descending=True)
+    padded_texts = padded_texts[sort_index]
+    padded_labels = padded_labels[sort_index]
+
+    return padded_texts, padded_labels, lengths
+
 
 
 def load_conll(path, encode):
@@ -126,7 +162,7 @@ class Vocabulary(object):
             token = token.lower()
             
         return token
-    
+
     def token_to_id(self, token):
         token = self.process_token(token)
         return self._token2id.get(token, len(self._token2id) -1)

@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence as pack
 from torch.nn.utils.rnn import pad_packed_sequence as unpack
 
-from biltsm_crf_ner_pytorch.utils import log_sum_exp
+from bilstm_crf_ner_pytorch.utils import log_sum_exp, viterbi_decode
+
 
 class charLSTM(nn.Module):
     def __init__(self,
@@ -61,13 +61,6 @@ class BiLSTM(nn.Module):
         self._num_labels = num_labels
         self._gpu = gpu
 
-        if embeddings is None:
-            self.embeddings = nn.Embedding(self._vocab_size, self._embedding_dim)
-        else:
-            self.embeddings = nn.Embedding.from_pretrained(embeddings)
-            self._embedding_dim = self.word_embeds.shape[0]
-
-
         self.lstm = nn.LSTM(input_size=self._embedding_dim, hidden_size=self._lstm_hidden_size // 2,
                             num_layers=1, dropout=self._dropout, batch_first=True, bidirectional=True)
         self.hidden2tag = nn.Linear(self._lstm_hidden_size, self._num_labels)
@@ -75,14 +68,14 @@ class BiLSTM(nn.Module):
     def init_hidden(self, batch_size):
         return (
             torch.zeros(2, batch_size, self._lstm_hidden_size//2),
-            torch.zeros(2, batch_size, self._lstm_hidden_size//2)/
+            torch.zeros(2, batch_size, self._lstm_hidden_size//2)
         )
 
-    def forword(self, x, num_sentence):
+    def forward(self, x, num_sentence):
         total_length = x.size(1)
         x = pack(input=x, lengths=num_sentence, batch_first=True)
 
-        init_hc = self.init_hidden(len(num_sentnece))
+        init_hc = self.init_hidden(len(num_sentence))
         out, (hid_n, cell_n) = self.lstm(x, init_hc)
 
         # Unpack
@@ -93,9 +86,8 @@ class BiLSTM(nn.Module):
         return out, (hid_n, cell_n)
 
 
-
 class CRF(nn.Module):
-    def __init__(self, num_labels, constraints=False, include_start_end=False):
+    def __init__(self, num_labels, constraints=None, include_start_end=False):
         super(CRF, self).__init__()
         self._num_labels = num_labels
 
@@ -115,8 +107,8 @@ class CRF(nn.Module):
 
         self.include_start_end_transtions = include_start_end
         if include_start_end:
-            self.start_transtions = nn.Parameter(torch.Tensor(num_labels))
-            self.end_transtions = nn.Parameter(torch.Tensor(num_labels))
+            self.start_transtions = nn.Parameter(torch.Tensor(num_labels), requires_grad=False)
+            self.end_transtions = nn.Parameter(torch.Tensor(num_labels), requires_grad=False)
 
         self.reset_parameters()
 
@@ -125,7 +117,6 @@ class CRF(nn.Module):
         if self.include_start_end_transtions:
             nn.init.normal_(self.start_transtions)
             nn.init.normal_(self.end_transtions)
-
 
     def _input_likelihood(self, logits, mask):
         batch_size, sequence_length, num_labels = logits.size()
@@ -145,12 +136,160 @@ class CRF(nn.Module):
 
             # Transition scores are (current_tag, next_tag) so broadcast along the instance axis
             transition_scores = self.transitions.view(1, num_labels, num_labels)
-
             # ALpha is for the current_tag so broadcast along the next tag axis
             broadcast_alpha = alpha.view(batch_size, num_labels, 1)
-
             # Add all the scores together and logexp over the current_tag dimension
-            inner  = broadcast_alpha + emit_scores + transition_scores
+            inner = broadcast_alpha + emit_scores + transition_scores
 
-            # In valid positions(mask
+            # In valid positions(mask == True) we want to take the logsumexp over the current_tag dimension
+            # of 'inner'. Otherwise (mask=False) we want to retain the previous alpha
+            alpha = log_sum_exp(inner, 1) * mask[i].view(batch_size, 1) + alpha * (~mask[i]).view(batch_size, 1)
 
+        # Every sequence needs to end with a transition to the stop_tag
+        if self.include_start_end_transtions:
+            stops = alpha + self.end_transtions.view(1, num_labels)
+        else:
+            stops = alpha
+
+        # Finally we log_sum_exp along the num_labels dim, result is (batch_size,)
+        return log_sum_exp(stops)
+
+    def _joint_likelihood(self, logits, tags, mask):
+        batch_size, sequence_length, _ = logits.data.shape
+
+        # Transpose batch size and sequence dimensions:
+        logits = logits.transpose(0, 1).contiguous()
+        mask = mask.transpose(0, 1).contiguous()
+        tags = tags.transpose(0, 1).contiguous()
+
+        # Start with the transition scores from start_tag to the first tag tag in each input
+        if self.include_start_end_transtions:
+            score = self.start_transtions.index_select(0, tags[0])
+        else:
+            score = 0.0
+
+        # Add up the scores for the observed transitioning from current_tag to next_tag
+        for i in range(sequence_length - 1):
+            # Each is shape (batch_size, )
+            current_tag, next_tag = tags[i], tags[i + 1]
+
+            # The scores for transitioning from current_tag to next_tag
+            transition_score = self.transitions[current_tag.view(-1), next_tag.view(-1)]
+
+            # The score for using current_tag
+            emit_score = logits[i].gather(1, current_tag.view(batch_size, 1)).squeeze(1)
+
+            # Include transition score if next element is unmasked
+            # input_score if this element is unmasked
+            score = score + transition_score * mask[i + 1] + emit_score * mask[i]
+
+        # Transition from last state to "stop" state. To start with, we need to find the last tag for each instance
+        last_tag_index = mask.sum(0).long() - 1
+        last_tags = tags.gather(0, last_tag_index.view(1, batch_size)).squeeze(0)
+
+        # Compute score of transitioning to 'stop_tag' from each 'last tags'
+        if self.include_start_end_transtions:
+            last_transition_score = self.end_transtions.index_select(0, last_tags)
+        else:
+            last_transition_score = 0.0
+
+        # Add the last input if it's not masked
+        last_inputs = logits[-1]
+        last_input_score = last_inputs.gather(1, last_tags.view(-1, 1))  # (batch_size, 1)
+        last_input_score = last_input_score.squeeze()  # (batch_size, )
+
+        score = score + last_transition_score + last_input_score * mask[-1]
+
+        return score
+
+    def forward(self, inputs, tags, mask=None):
+        if mask is None:
+            mask = torch.ones(*tags.size(), dtype=torch.bool)
+        else:
+            mask = mask.to(torch.bool)
+        log_denominator = self._input_likelihood(inputs, mask)
+        log_numerator = self._joint_likelihood(inputs, tags, mask)
+
+        return torch.sum(log_numerator - log_denominator)
+
+    def viterbi_tags(self, logits, mask=None, top_k=None):
+        if mask is None:
+            mask = torch.ones(*logits.shape[:2], dtype=torch.bool, device=logits.device)
+
+        if top_k is None:
+            top_k = 1
+            flatten_output = True
+        else:
+            flatten_output = False
+
+        _, max_seq_length, num_tags = logits.size()
+
+        # Get the tensors our of the variables
+        logits, mask = logits.data, mask.data
+
+        # Augment transitions matrix with start and end transitions
+        start_tag = num_tags
+        end_tag = num_tags + 1
+        transitions = torch.Tensor(num_tags + 2, num_tags + 2).fill_(-1000.0)
+
+        # Apply transition constraints
+        constrained_transitions = self.transitions * self._constrain_mask[:num_tags, :num_tags]\
+                                  + -1000.0 * (1 - self._constrain_mask[:num_tags, :num_tags])
+        transitions[:num_tags, :num_tags] = constrained_transitions.data
+
+        if self.include_start_end_transtions:
+            transitions[
+                start_tag, :num_tags
+            ] = self.start_transtions.detach() * self._constrain_mask[
+                start_tag, :num_tags
+            ].data + -10000.0 * (
+                1 - self._constrain_mask[start_tag, :num_tags].detach()
+            )
+            transitions[:num_tags, end_tag] = self.end_transtions.detach() * self._constrain_mask[
+                :num_tags, end_tag
+            ].data + -10000.0 * (
+                1 - self._constrain_mask[:num_tags, end_tag].detach()
+            )
+        else:
+            transitions[start_tag, :num_tags] = -10000.0 * (
+                1 - self._constrain_mask[start_tag, :num_tags].detach()
+            )
+            transitions[:num_tags, end_tag] = -10000.0 * (
+                1 - self._constrain_mask[:num_tags, end_tag].detach()
+            )
+
+        best_paths = []
+        # Pad the max sequence length by 2 to account for start_tag + end_tag
+        tag_sequence = torch.Tensor(max_seq_length + 2, num_tags + 2)
+
+        for prediction, prediction_mask in zip(logits, mask):
+            mask_indices = prediction_mask.nonzero().squeeze()
+            masked_prediction = torch.index_select(prediction, 0, mask_indices)
+            sequence_length = masked_prediction.shape[0]
+
+            # Start with everything totally unlikely
+            tag_sequence.fill_(-10000.0)
+            # At timestep 0 we must have the START_TAG
+            tag_sequence[0, start_tag] = 0.0
+            # At steps 1, ..., sequence_length we junst use the incoming prediction
+            tag_sequence[1: (sequence_length + 1), :num_tags] = masked_prediction
+            # And at the last timestep we must have the END_TAG
+            tag_sequence[sequence_length + 1, end_tag] = 0.0
+
+            # We pass the tags and the transitions to 'viterbi_decode'
+            viterbi_paths, viterbi_scores = viterbi_decode(
+                tag_sequence=tag_sequence[: (sequence_length + 2)],
+                transition_matrix=transitions,
+                top_k=top_k
+            )
+            top_k_paths = []
+            for viterbi_path, viterbi_score in zip(viterbi_paths, viterbi_scores):
+                # Get rid of START and END sentinels and append
+                viterbi_path = viterbi_path[1:-1]
+                top_k_paths.append((viterbi_path, viterbi_score.item()))
+            best_paths.append(top_k_paths)
+
+        if flatten_output:
+            return [top_k_paths[0] for top_k_paths in best_paths]
+
+        return best_paths

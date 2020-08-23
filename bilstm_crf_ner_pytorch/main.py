@@ -1,10 +1,12 @@
 from logging import getLogger
+import torch
+import torch.optim as optim
 
+from bilstm_crf_ner_pytorch.dataloader import DataLoader, filter_embeddings
+from bilstm_crf_ner_pytorch.models import Model
+from bilstm_crf_ner_pytorch.preprocessing import IndexTransformer
+from bilstm_crf_ner_pytorch.trainer import Trainer
 
-from biltsm_crf_ner_pytorch.dataloader import DataLoader
-#from biltsm_crf_ner_pytorch.preprocessing import Sequence
-
-'''
 class main(object):
 
     def __init__(self,
@@ -32,29 +34,26 @@ class main(object):
 
     def fit(self, x_train, y_train, x_valid=None, y_valid=None,
             epochs=150, batch_size=32, shuffle=True):
-        p = IndexTransformer(initial_vocab=self.initial_vocab, use_char=self.use_char)
-        p.fit(x_train, y_train)
-        embeddings = filter_embeddings(self.embeddings, p._word_vocab.vocab, self.word_embedding_dim)
+        preprocessor = IndexTransformer(initial_vocab=self.initial_vocab, use_char=self.use_char)
+        preprocessor.fit(x_train, y_train)
+        embeddings = filter_embeddings(self.embeddings, preprocessor._word_vocab.vocab, self.word_embedding_dim)
 
-        model = BiLSTMCRF(char_vocab_size=p.char_vocab_size,
-                          vocab_size=p.word_vocab_size,
-                          num_labels=p.label_size,
-                          embedding_dim=self.word_embedding_dim,
-                          char_embedding_dim=self.char_embedding_dim,
-                          lstm_hidden_size=self.word_lstm_hidden_size,
-                          char_lstm_hidden_size=self.char_lstm_hidden_size,
-                          dropout=self.dropout,
-                          embeddings=embeddings,
-                          use_char=self.use_char,
-                          gpu=self.gpu)
+        model = Model(preprocessor=preprocessor,
+                      embeddings=embeddings,
+                      char_embedding_dim=self.char_embedding_dim,
+                      char_lstm_hidden_size=self.char_lstm_hidden_size,
+                      word_embedding_dim=self.word_embedding_dim,
+                      word_lstm_hidden_size=self.word_lstm_hidden_size,
+                      dropout=self.dropout,
+                      use_char=self.use_char,
+                      initial_vocab=self.initial_vocab)
 
         optimizer = optim.SGD(model.parameters(), lr=0.015, weight_decay=1e-4)
 
-        trainer = Trainer(model, optimizer, preprocessor=p, use_char=self.use_char, gpu=self.gpu)
+        trainer = Trainer(model, optimizer=optimizer, preprocessor=preprocessor, use_char=self.use_char, gpu=self.gpu)
         trainer.train(x_train, y_train, x_valid, y_valid,
                       epochs=epochs, batch_size=batch_size, shuffle=shuffle)
-
-        self.p = p
+        self.p = preprocessor
         self.model = model
 
     def predict(self, x_test):
@@ -102,20 +101,22 @@ class main(object):
         self.model = load_model(weights_file, params_file)
 
         return self
-'''
+
 
 if __name__ == '__main__':
 
     chemdner_train_link = '../../dataset/chemdner/full_type_data/conllform/train_conllform.txt'
-    chemdner_dev_link = '../../dataset/chemdner/full_type_data/conllform/valid_conllform.txt'
+    chemdner_valid_link = '../../dataset/chemdner/full_type_data/conllform/valid_conllform.txt'
     chemdner_test_link = '../../dataset/chemdner/full_type_data/conllform/test_conllform.txt'
 
     leader = DataLoader(anno_format='conll')
 
     x_train, y_train = leader.load_data(chemdner_train_link)
-    x_dev, y_dev = leader.load_data(chemdner_dev_link)
+    x_valid, y_valid = leader.load_data(chemdner_valid_link)
     x_test, y_test = leader.load_data(chemdner_test_link)
 
-    print(1e+12)
+    model = main(use_char=False)
+    model.fit(x_train, y_train, x_valid, y_valid, batch_size=10, shuffle=True)
+
     #model = Sequence(use_char=True)
     #model.fit(x_train=x_train[:100], y_train=y_train[:100], epochs=1, batch_size=10, shuffle=True)
