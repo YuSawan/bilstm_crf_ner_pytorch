@@ -7,33 +7,17 @@ import torch
 import numpy as np
 import torch.utils.data as data
 
-class NERSequence(data.Dataset):
-
-    def __init__(self, x, y, batch_size=1, preprocess=None):
-        self.x = x
-        self.y = y
-        self.batch_size = batch_size
-        self.preprocess = preprocess
-
-        
-    def __getitem__(self, idx):
-        #batch_x = self.x[idx * self.batch_size: (idx + 1) * self.batch_size]
-        #batch_y = self.y[idx * self.batch_size: (idx + 1) * self.batch_size]
-        
-        return self.x[idx], self.y[idx]
-    
-    def __len__(self):
-        return math.ceil(len(self.x) / self.batch_size)
 
 class Dataset(data.Dataset):
 
-    def __init__(self, text, label):
+    def __init__(self, text, label, preprocessor):
         self.text = text
         self.label = label
         self.num_data = len(label)
+        self.preprocessor = preprocessor
 
     def __getitem__(self, idx):
-        return self.text[idx], self.label[idx]
+        return self.preprocessor(self.text[idx], self.label[idx])
 
     def __len__(self):
         return self.num_data
@@ -51,18 +35,44 @@ def collate_fn(data):
             padded_labels[i, :end] = torch.LongTensor(label[:end])
         return padded_texts, padded_labels, lengths
 
+    def _merge_chars(chars):
+        lengths = [len(s) for s in chars]
+        chars = [chars[idx] + [[0]] * (max(lengths)-len(chars[idx])) for idx in range(len(chars))]
+        char_lengths = [list(map(len, char)) for char in chars]
+        max_word_len = max(map(max, char_lengths))
+        char_lengths = torch.LongTensor(char_lengths)
+        padded_chars = torch.zeros((len(lengths), max(lengths), max_word_len)).long()
+        for i, (sent, sent_len) in enumerate(zip(chars, char_lengths)):
+            for j, (word, word_len) in enumerate(zip(sent, sent_len)):
+                padded_chars[i, j, :word_len] = torch.LongTensor(word)
+        return padded_chars, char_lengths
+
     # Reshape items
-    texts, labels = zip(*data)
+    features, labels = zip(*data)
+    batch_size = len(labels)
+    if isinstance(features[0], tuple):
+        texts, chars = zip(*features)
+        # Convert to tensor
+        padded_chars, char_lengths = _merge_chars(chars)
+    else:
+        texts = features
+
     # Convert to tensor
     padded_texts, padded_labels, lengths = _merge_text(texts, labels)
-
     # Sort by the sentence length to feed in pack_padded_sequence
     lengths, sort_index = torch.sort(torch.LongTensor(lengths), dim=0, descending=True)
     padded_texts = padded_texts[sort_index]
     padded_labels = padded_labels[sort_index]
 
-    return padded_texts, padded_labels, lengths
-
+    if isinstance(features[0], tuple):
+        padded_chars = padded_chars[sort_index].view(batch_size*max(lengths), -1)
+        char_lengths = char_lengths[sort_index].view(batch_size*max(lengths), )
+        char_lengths, char_sort_index = torch.sort(char_lengths, dim=0, descending=True)
+        padded_chars = padded_chars[char_sort_index]
+        _, char_tensor_recover = torch.sort(char_sort_index, dim=0, descending=False)
+        return padded_texts, padded_labels, lengths, padded_chars, char_lengths, char_tensor_recover
+    else:
+        return padded_texts, padded_labels, lengths, None, None, None
 
 
 def load_conll(path, encode):
@@ -98,7 +108,7 @@ def load_pubchem(path, encode):
     return sents, labels
 '''
 
-class DataLoader:
+class CorpusReader:
     def __init__(self, anno_format):
         assert anno_format in ['conll', 'brat', 'pubchem'], "The Annotation Format Does Not Correspond This Format"
         self.format = anno_format #{conll, brat, pubchem}

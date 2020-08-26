@@ -1,8 +1,10 @@
 from logging import getLogger
 import torch
+import torch.nn as nn
 import torch.optim as optim
+import os
 
-from bilstm_crf_ner_pytorch.dataloader import DataLoader, filter_embeddings
+from bilstm_crf_ner_pytorch.dataloader import CorpusReader, filter_embeddings
 from bilstm_crf_ner_pytorch.models import Model
 from bilstm_crf_ner_pytorch.preprocessing import IndexTransformer
 from bilstm_crf_ner_pytorch.trainer import Trainer
@@ -17,7 +19,9 @@ class main(object):
                  dropout=0.5,
                  embeddings=None,
                  use_char=True,
-                 initial_vocab=None):
+                 initial_vocab=None,
+                 model_path=None,
+                 preprocessor_path=None):
         self.model = None
         self.p = None
         self.tagger = None
@@ -30,10 +34,12 @@ class main(object):
         self.embeddings = embeddings
         self.use_char = use_char
         self.initial_vocab = initial_vocab
-        self.gpu = torch.cuda.is_available()
+        self.model_path = model_path
+        self.preprocessor_path = preprocessor_path
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     def fit(self, x_train, y_train, x_valid=None, y_valid=None,
-            epochs=150, batch_size=32, shuffle=True):
+            epochs=150, batch_size=32, shuffle=True, early_stop=5):
         preprocessor = IndexTransformer(initial_vocab=self.initial_vocab, use_char=self.use_char)
         preprocessor.fit(x_train, y_train)
         embeddings = filter_embeddings(self.embeddings, preprocessor._word_vocab.vocab, self.word_embedding_dim)
@@ -46,15 +52,24 @@ class main(object):
                       word_lstm_hidden_size=self.word_lstm_hidden_size,
                       dropout=self.dropout,
                       use_char=self.use_char,
-                      initial_vocab=self.initial_vocab)
+                      initial_vocab=self.initial_vocab,
+                      device = self.device)
 
         optimizer = optim.SGD(model.parameters(), lr=0.015, weight_decay=1e-4)
 
-        trainer = Trainer(model, optimizer=optimizer, preprocessor=preprocessor, use_char=self.use_char, gpu=self.gpu)
+        if self.device != 'cpu':
+            model.to(self.device)
+
+        trainer = Trainer(model,
+                          optimizer=optimizer,
+                          preprocessor=preprocessor,
+                          use_char=self.use_char,
+                          device=self.device)
         trainer.train(x_train, y_train, x_valid, y_valid,
-                      epochs=epochs, batch_size=batch_size, shuffle=shuffle)
+                      epochs=epochs, batch_size=batch_size, shuffle=shuffle, early_stop=early_stop)
         self.p = preprocessor
-        self.model = model
+        self.p.save(self.preprocessor_path)
+        torch.save(trainer.best_model, self.model_path)
 
     def predict(self, x_test):
         lengths = map(len, x_test)
@@ -83,16 +98,13 @@ class main(object):
         else:
             raise OSError('Could not find a model. Call load(dir_path).')
 
-    # def analyze(self, text, tokenizer=str.split):
-    #    if not self.tagger:
-    #        self.tagger = Tagger(self.model,
-    #                            preprocessor=self.p,
-    #                            tokenizer=tokenizer)
-    #    return self.tagger.analyze(text)
 
-    def save(self, weights_file, param_file, preprocessor_file):
-        self.p.save(preprocessor_file)
-        save_model(self.model, weights_file, params_file)
+    def analyze(self, text, tokenizer=str.split):
+        if not self.tagger:
+            self.tagger = Tagger(self.model,
+                                preprocessor=self.p,
+                                tokenizer=tokenizer)
+        return self.tagger.analyze(text)
 
     @classmethod
     def load(cls, weights_file, params_file, preprocessor_file):
@@ -109,14 +121,14 @@ if __name__ == '__main__':
     chemdner_valid_link = '../../dataset/chemdner/full_type_data/conllform/valid_conllform.txt'
     chemdner_test_link = '../../dataset/chemdner/full_type_data/conllform/test_conllform.txt'
 
-    leader = DataLoader(anno_format='conll')
+    leader = CorpusReader(anno_format='conll')
 
     x_train, y_train = leader.load_data(chemdner_train_link)
     x_valid, y_valid = leader.load_data(chemdner_valid_link)
     x_test, y_test = leader.load_data(chemdner_test_link)
 
-    model = main(use_char=False)
-    model.fit(x_train, y_train, x_valid, y_valid, batch_size=10, shuffle=True)
+    model_path = './best_model1_non_pretrained.model'
+    processor_path = './processor.joblib'
 
-    #model = Sequence(use_char=True)
-    #model.fit(x_train=x_train[:100], y_train=y_train[:100], epochs=1, batch_size=10, shuffle=True)
+    model = main(use_char=True, model_path=model_path, preprocessor_path=processor_path)
+    model.fit(x_train, y_train, x_valid, y_valid, batch_size=100, shuffle=True)

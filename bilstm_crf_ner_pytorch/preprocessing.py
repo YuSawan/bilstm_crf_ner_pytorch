@@ -34,19 +34,24 @@ class IndexTransformer(BaseEstimator, TransformerMixin):
         return self
         
     def transform(self, X, y=None):
-        X = [self._word_vocab.doc2id(doc) for doc in X]
+        word_ids = self._word_vocab.doc2id(X)
+
+        if self._use_char:
+            char_ids = [self._char_vocab.doc2id(w) for w in X]
+            features = (word_ids, char_ids)
+        else:
+            features = word_ids
 
         if y is not None:
-            y = [self._label_vocab.doc2id(doc) for doc in y]
-            return X, y
+            y = self._label_vocab.doc2id(y)
+            return features, y
         else:
-            return X
-        
+            return features
+
     def fit_transform(self, X, y=None, **params):
         return self.fit(X, y).transform(X, y)
     
     def inverse_transform(self, y, lengths=None):
-        print(y)
         inverse_y = [self._label_vocab.id2doc(ids) for ids in y]
         if lengths is not None:
             inverse_y = [iy[:l] for iy, l in zip(inverse_y, lengths)]
@@ -73,19 +78,3 @@ class IndexTransformer(BaseEstimator, TransformerMixin):
         p = joblib.load(file_path)
         
         return p
-
-
-def pad_nested_sequences(sequences, dtype='int64'):
-    max_sent_len = 0
-    max_word_len = 0
-    for sent in sequences:
-        max_sent_len = max(len(sent), max_sent_len)
-        for word in sent:
-            max_word_len = max(len(word), max_word_len)
-            
-    x = np.zeros((len(sequences), max_sent_len, max_word_len)).astype(dtype)
-    for i, sent in enumerate(sequences):
-        for j, word in enumerate(sent):
-            x[i, j, :len(word)] = word
-            
-    return torch.from_numpy(x)

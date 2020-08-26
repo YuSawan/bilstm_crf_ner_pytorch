@@ -11,36 +11,40 @@ class charLSTM(nn.Module):
                  vocab_size=None,
                  embedding_dim=25,
                  lstm_hidden_size=25,
-                 dropout=0.5):
+                 dropout=0.5,
+                 device='cpu'):
         super(charLSTM, self).__init__()
         self._vocab_size = vocab_size
         self._embedding_dim = embedding_dim
         self._lstm_hidden_size = lstm_hidden_size
         self._dropout = dropout
 
+        self.dropout = nn.Dropout(p=self._dropout)
         self.char_embeddings = nn.Embedding(self._vocab_size, self._embedding_dim)
         self.char_lstm = nn.LSTM(input_size=self._embedding_dim, hidden_size=self._lstm_hidden_size,
                                  num_layers=1, dropout=self._dropout, batch_first=True, bidirectional=True)
 
-    def init_hidden(self, batch_size):
-        return {
-            torch.zeros(2, batch_size, self._lstm_hidden_size),
-            torch.zeros(2, batch_size, self._lstm_hidden_size)
-        }
 
-    def forward(self, x, num_character):
-        total_length = x.size(1)
-        x = pack(input=x, lengths=num_character, batch_first=True)
+    def get_last_hiddens(self, x_char, num_character):
+        batch_size =  x_char.size(0)
+        char_embeds = self.char_embeddings(x_char)
+        char_embeds = self.dropout(char_embeds)
+        char_hidden = None
+        char_embeds = pack(input=char_embeds, lengths=num_character, batch_first=True)
+        out, (hid_n, cell_n) = self.char_lstm(char_embeds, char_hidden)
+        return hid_n.transpose(1, 0).contiguous().view(batch_size, -1)
 
-        init_hc = self.init_hidden(len(num_character))
-        out, (hid_n, cell_n) = self.char_lstm(x, init_hc)
 
-        # Unpack
-        out, _ = unpack(
-            out, batch_first=True, padding_value=0., total_length=total_length
-        )
-
+    def get_all_hiddens(self, x_char, num_character):
+        char_embeds = self.char_embeddings(x_char)
+        char_hidden = None
+        char_embeds = pack(input=char_embeds, lengths=num_character, batch_first=True)
+        out, (hid_n, cell_n)  = self.char_lstm(char_embeds, char_hidden)
+        out, _ = unpack(out, batch_first=True, padding_value=0.)
         return out, (hid_n, cell_n)
+
+    def forward(self, x_char, num_character):
+        return self.get_all_hiddens(x_char, num_character)
 
 
 class BiLSTM(nn.Module):
@@ -52,14 +56,14 @@ class BiLSTM(nn.Module):
                  lstm_hidden_size=200,
                  dropout=0.5,
                  embeddings=None,
-                 gpu=False):
+                 device='cpu'):
         super(BiLSTM, self).__init__()
         self._embedding_dim = embedding_dim
         self._lstm_hidden_size = lstm_hidden_size
         self._vocab_size = vocab_size
         self._dropout = dropout
         self._num_labels = num_labels
-        self._gpu = gpu
+        self._device = device
 
         self.lstm = nn.LSTM(input_size=self._embedding_dim, hidden_size=self._lstm_hidden_size // 2,
                             num_layers=1, dropout=self._dropout, batch_first=True, bidirectional=True)
@@ -67,8 +71,8 @@ class BiLSTM(nn.Module):
 
     def init_hidden(self, batch_size):
         return (
-            torch.zeros(2, batch_size, self._lstm_hidden_size//2),
-            torch.zeros(2, batch_size, self._lstm_hidden_size//2)
+            torch.zeros(2, batch_size, self._lstm_hidden_size//2).to(self._device),
+            torch.zeros(2, batch_size, self._lstm_hidden_size//2).to(self._device)
         )
 
     def forward(self, x, num_sentence):
@@ -87,7 +91,7 @@ class BiLSTM(nn.Module):
 
 
 class CRF(nn.Module):
-    def __init__(self, num_labels, constraints=None, include_start_end=False):
+    def __init__(self, num_labels, constraints=None, include_start_end=False, device='cpu'):
         super(CRF, self).__init__()
         self._num_labels = num_labels
 
@@ -109,6 +113,8 @@ class CRF(nn.Module):
         if include_start_end:
             self.start_transtions = nn.Parameter(torch.Tensor(num_labels), requires_grad=False)
             self.end_transtions = nn.Parameter(torch.Tensor(num_labels), requires_grad=False)
+
+        self.device = device
 
         self.reset_parameters()
 
@@ -204,13 +210,13 @@ class CRF(nn.Module):
 
     def forward(self, inputs, tags, mask=None):
         if mask is None:
-            mask = torch.ones(*tags.size(), dtype=torch.bool)
+            mask = torch.ones(*tags.size(), dtype=torch.bool).to(self.device)
         else:
             mask = mask.to(torch.bool)
         log_denominator = self._input_likelihood(inputs, mask)
         log_numerator = self._joint_likelihood(inputs, tags, mask)
 
-        return torch.sum(log_numerator - log_denominator)
+        return torch.sum(log_denominator - log_numerator)
 
     def viterbi_tags(self, logits, mask=None, top_k=None):
         if mask is None:

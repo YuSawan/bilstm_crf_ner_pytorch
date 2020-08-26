@@ -1,5 +1,6 @@
 import torch
 import math
+import json
 from logging import getLogger
 
 logger = getLogger(__name__)
@@ -8,9 +9,11 @@ def argmax(vec):
     _, idx = torch.max(vec, 1)
     return idx.item()
 
+
 def prepare_sequence(seq, to_ix):
     idxs = [to_ix[w] for w in seq]
     return torch.tensor(idxs, dtype=torch.long)
+
 
 def log_sum_exp(tensor, dim=-1, keepdim=False):
     max_score, _ = tensor.max(dim, keepdim=keepdim)
@@ -20,6 +23,7 @@ def log_sum_exp(tensor, dim=-1, keepdim=False):
         stable_vec = tensor - max_score.unsqueeze(dim)
 
     return max_score + (stable_vec.exp().sum(dim, keepdim=keepdim)).log()
+
 
 def viterbi_decode(tag_sequence, transition_matrix, tag_observations=None,
                    allowed_start_transitions=None, allowed_end_transitions=None, top_k=None):
@@ -72,7 +76,7 @@ def viterbi_decode(tag_sequence, transition_matrix, tag_observations=None,
         tag_observations = [-1 for _ in range(sequence_length)]
 
     if has_start_end_restriction:
-        tag_observations = [num_tags - 2] + tag_observations + [num_tags -1]
+        tag_observations = [num_tags - 2] + tag_observations + [num_tags - 1]
         zero_sentinel = torch.zeros(1, num_tags)
         extra_tags_sentinel = torch.ones(sequence_length, 2) * -math.inf
         tag_sequence = torch.cat([tag_sequence, extra_tags_sentinel], -1)
@@ -130,3 +134,69 @@ def viterbi_decode(tag_sequence, transition_matrix, tag_observations=None,
             return viterbi_paths[0], viterbi_scores[0]
 
         return viterbi_paths, viterbi_scores
+
+
+def get_entities(seq, preprocessor, lengths):
+    seq = preprocessor.inverse_transform(seq, lengths=lengths)
+    seq = [item for sublist in seq for item in sublist]
+
+    prev_tag = 'O'
+    prev_type = ''
+    begin_offset = 0
+    chunks = []
+    for i, chunk in enumerate(seq+['O']):
+        tag = chunk[0]
+        type_ = chunk.split('-')[-1]
+
+        if end_of_chunk(prev_tag, tag):
+            chunks.append((prev_type, begin_offset, i-1))
+        if start_of_chunk(prev_tag, tag):
+            begin_offset = i
+        prev_tag = tag
+        prev_type = type_
+
+    return chunks
+
+
+def end_of_chunk(prev_tag, tag):
+    chunk_end = False
+
+    if prev_tag == 'E' or prev_tag == 'S':
+        chunk_end = True
+
+    if prev_tag == 'B' and tag == 'B':
+        chunk_end = True
+    if prev_tag == 'B' and tag == 'S':
+        chunk_end = True
+    if prev_tag == 'B' and tag == 'O':
+        chunk_end = True
+    if prev_tag == 'I' and tag == 'B':
+        chunk_end = True
+    if prev_tag == 'I' and tag == 'S':
+        chunk_end = True
+    if prev_tag == 'I' and tag == 'O':
+        chunk_end = True
+
+    return chunk_end
+
+
+def start_of_chunk(prev_tag, tag):
+    chunk_start = False
+
+    if tag == 'B' or tag == 'S':
+        chunk_start = True
+
+    if prev_tag == 'E' and tag == 'E':
+        chunk_start = True
+    if prev_tag == 'E' and tag == 'I':
+        chunk_start = True
+    if prev_tag == 'S' and tag == 'E':
+        chunk_start = True
+    if prev_tag == 'S' and tag == 'I':
+        chunk_start = True
+    if prev_tag == 'O' and tag == 'E':
+        chunk_start = True
+    if prev_tag == 'O' and tag == 'I':
+        chunk_start = True
+
+    return chunk_start
