@@ -29,11 +29,13 @@ def collate_fn(data):
         lengths = [len(s) for s in texts]
         padded_texts = torch.zeros(len(lengths), max(lengths)).long()
         padded_labels = torch.zeros(len(lengths), max(lengths)).long()
+        mask  = torch.zeros(len(lengths), max(lengths), dtype=torch.bool)
         for i, (text, label) in enumerate(zip(texts, labels)):
             end = lengths[i]
             padded_texts[i, :end] = torch.LongTensor(text[:end])
             padded_labels[i, :end] = torch.LongTensor(label[:end])
-        return padded_texts, padded_labels, lengths
+            mask[i, :end] = torch.ones(end, dtype=torch.bool)
+        return padded_texts, padded_labels, lengths, mask
 
     def _merge_chars(chars):
         lengths = [len(s) for s in chars]
@@ -58,11 +60,12 @@ def collate_fn(data):
         texts = features
 
     # Convert to tensor
-    padded_texts, padded_labels, lengths = _merge_text(texts, labels)
+    padded_texts, padded_labels, lengths, mask = _merge_text(texts, labels)
     # Sort by the sentence length to feed in pack_padded_sequence
     lengths, sort_index = torch.sort(torch.LongTensor(lengths), dim=0, descending=True)
     padded_texts = padded_texts[sort_index]
     padded_labels = padded_labels[sort_index]
+    mask = mask[sort_index]
 
     if isinstance(features[0], tuple):
         padded_chars = padded_chars[sort_index].view(batch_size*max(lengths), -1)
@@ -70,9 +73,9 @@ def collate_fn(data):
         char_lengths, char_sort_index = torch.sort(char_lengths, dim=0, descending=True)
         padded_chars = padded_chars[char_sort_index]
         _, char_tensor_recover = torch.sort(char_sort_index, dim=0, descending=False)
-        return padded_texts, padded_labels, lengths, padded_chars, char_lengths, char_tensor_recover
+        return padded_texts, padded_labels, lengths, mask, padded_chars, char_lengths, char_tensor_recover
     else:
-        return padded_texts, padded_labels, lengths, None, None, None
+        return padded_texts, padded_labels, lengths, mask, None, None, None
 
 
 def load_conll(path, encode):
