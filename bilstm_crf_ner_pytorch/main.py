@@ -99,12 +99,12 @@ class main(object):
             raise OSError('Could not find a model. Call load(dir_path).')
 
 
-    def analyze(self, text, tokenizer=str.split):
-        if not self.tagger:
-            self.tagger = Tagger(self.model,
-                                preprocessor=self.p,
-                                tokenizer=tokenizer)
-        return self.tagger.analyze(text)
+    #def analyze(self, text, tokenizer=str.split):
+    #    if not self.tagger:
+    #        self.tagger = Tagger(self.model,
+    #                            preprocessor=self.p,
+    #                            tokenizer=tokenizer)
+    #    return self.tagger.analyze(text)
 
     @classmethod
     def load(cls, weights_file, params_file, preprocessor_file):
@@ -131,4 +131,4 @@ if __name__ == '__main__':
     processor_path = './processor.joblib'
 
     model = main(use_char=True, model_path=model_path, preprocessor_path=processor_path)
-    model.fit(x_train, y_train, x_valid, y_valid, batch_size=100, shuffle=True)
+    model.fit(x_train, y_train, x_valid, y_valid, batch_size=100, shuffle=True, early_stop=10)

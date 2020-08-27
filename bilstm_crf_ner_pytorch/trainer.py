@@ -31,14 +31,15 @@ class Trainer(object):
 
         start_at = time.time()
         best_loss = 1e+12
+        stop_count = 0
         for epoch in range(epochs):
-
             Loss = []
             self.model.train()
+            self.model.zero_grad()
             for batch in tqdm(train_loader):
+            #for batch in train_loader:
                 loss = self.model(batch)
 
-                self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
                 self.model.zero_grad()
@@ -51,6 +52,7 @@ class Trainer(object):
             print(f'(Train-data) Epoch: {epoch + 1} Time: {temp_time - start_at} loss: {ave_loss}')
             logger.info(f'(Train_data) Epoch: {epoch + 1} Time: {temp_time - start_at} loss: {ave_loss}')
 
+
             if valid_loader:
                 Loss = []
                 num_pred = 0
@@ -58,17 +60,16 @@ class Trainer(object):
                 num_tp = 0
                 self.model.eval()
                 for batch in tqdm(valid_loader):
-                    with torch.no_grad():
-                        _, _, lengths, _, _, _ = batch
-                        loss = self.model(batch)
-                        pred_paths, gold_tags = self.model.decode_tags(batch)
-                        pred_tags, pred_scores = zip(*pred_paths)
-                        pred_chunks = set(get_entities(pred_tags, self.preprocessor, lengths))
-                        gold_chunks = set(get_entities(gold_tags, self.preprocessor, lengths))
+                    _, _, lengths, _, _, _, _ = batch
+                    loss = self.model(batch)
+                    pred_paths, gold_tags = self.model.decode_tags(batch)
+                    pred_tags, pred_scores = zip(*pred_paths)
+                    pred_chunks = set(get_entities(pred_tags, self.preprocessor, lengths))
+                    gold_chunks = set(get_entities(gold_tags, self.preprocessor, lengths))
 
-                        num_pred += len(pred_chunks)
-                        num_gold += len(gold_chunks)
-                        num_tp += len(pred_chunks & gold_chunks)
+                    num_pred += len(pred_chunks)
+                    num_gold += len(gold_chunks)
+                    num_tp += len(pred_chunks & gold_chunks)
 
                     Loss.append(loss.item())
 
@@ -81,9 +82,11 @@ class Trainer(object):
                     stop_count = 0
                     print('best_model update')
                     logger.info(f'model update')
+                    best_loss = sum(Loss)/len(Loss)
                     self.best_model = self.model.state_dict()
                 else:
                     stop_count += 1
                     if early_stop > 0 and stop_count > early_stop:
                         print(f'Early stopping at epoch {epoch+1}')
                         logger.info(f'Early stoppping at epoch {epoch+1}')
+                        break

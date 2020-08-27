@@ -50,12 +50,13 @@ class Model(nn.Module):
         self.tagger = CRF(num_labels=self.p.label_size, device=self.device)
 
     def decode_tags(self, batch):
-        tok_tensor, tag_tensor, lengths, char_tensor, char_lengths, char_tensor_recover = batch
+        tok_tensor, tag_tensor, lengths, mask, char_tensor, char_lengths, char_tensor_recover = batch
 
         # Send input tensors to CPU/GPU
         tok_tensor = tok_tensor.to(self.device)
         tag_tensor = tag_tensor.to(self.device)
         lengths = lengths.to(self.device)
+        mask = mask.to(self.device)
         char_tensor = char_tensor.to(self.device)
         char_lengths = char_lengths.to(self.device)
         char_tensor_recover = char_tensor_recover.to(self.device)
@@ -72,17 +73,18 @@ class Model(nn.Module):
 
         seq_embs, _ = self.seq_encoder(tok_embs, lengths)
         outputs = self.hidden2tag(seq_embs)
-        tag_seq = self.tagger.viterbi_tags(outputs)
+        tag_seq = self.tagger.viterbi_tags(outputs, mask)
 
         return tag_seq, tag_tensor
 
     def forward(self, batch):
-        tok_tensor, tag_tensor, lengths, char_tensor, char_lengths, char_tensor_recover = batch
+        tok_tensor, tag_tensor, lengths, mask, char_tensor, char_lengths, char_tensor_recover = batch
 
         # Send input tensors to CPU/GPU
         tok_tensor = tok_tensor.to(self.device)
         tag_tensor = tag_tensor.to(self.device)
         lengths = lengths.to(self.device)
+        mask = mask.to(self.device)
         char_tensor = char_tensor.to(self.device)
         char_lengths = char_lengths.to(self.device)
         char_tensor_recover = char_tensor_recover.to(self.device)
@@ -100,6 +102,6 @@ class Model(nn.Module):
         tok_embs = self.dropout(tok_embs)
         seq_embs, _ = self.seq_encoder(tok_embs, lengths)
         outputs = self.hidden2tag(seq_embs)
-        loss = self.tagger(outputs, tag_tensor)
+        loss = self.tagger(outputs, tag_tensor, mask)
 
         return loss

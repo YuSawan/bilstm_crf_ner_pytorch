@@ -160,6 +160,7 @@ class CRF(nn.Module):
         # Finally we log_sum_exp along the num_labels dim, result is (batch_size,)
         return log_sum_exp(stops)
 
+
     def _joint_likelihood(self, logits, tags, mask):
         batch_size, sequence_length, _ = logits.data.shape
 
@@ -208,19 +209,24 @@ class CRF(nn.Module):
 
         return score
 
+
     def forward(self, inputs, tags, mask=None):
+        batch_size = inputs.size(0)
         if mask is None:
             mask = torch.ones(*tags.size(), dtype=torch.bool).to(self.device)
-        else:
-            mask = mask.to(torch.bool)
+
         log_denominator = self._input_likelihood(inputs, mask)
         log_numerator = self._joint_likelihood(inputs, tags, mask)
 
-        return torch.sum(log_denominator - log_numerator)
+        #print(torch.sum(log_denominator-log_numerator)/batch_size)
+        #print(torch.sum(log_numerator-log_denominator)/batch_size)
+        return torch.sum(log_denominator - log_numerator) / batch_size
+
 
     def viterbi_tags(self, logits, mask=None, top_k=None):
         if mask is None:
-            mask = torch.ones(*logits.shape[:2], dtype=torch.bool, device=logits.device)
+            print()
+            mask = torch.ones(*logits.shape[:2], dtype=torch.bool, device=self.device)
 
         if top_k is None:
             top_k = 1
@@ -236,11 +242,11 @@ class CRF(nn.Module):
         # Augment transitions matrix with start and end transitions
         start_tag = num_tags
         end_tag = num_tags + 1
-        transitions = torch.Tensor(num_tags + 2, num_tags + 2).fill_(-1000.0)
+        transitions = torch.Tensor(num_tags + 2, num_tags + 2).fill_(-10000.0)
 
         # Apply transition constraints
         constrained_transitions = self.transitions * self._constrain_mask[:num_tags, :num_tags]\
-                                  + -1000.0 * (1 - self._constrain_mask[:num_tags, :num_tags])
+                                  + -10000.0 * (1 - self._constrain_mask[:num_tags, :num_tags])
         transitions[:num_tags, :num_tags] = constrained_transitions.data
 
         if self.include_start_end_transtions:

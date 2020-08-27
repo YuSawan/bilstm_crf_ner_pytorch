@@ -42,7 +42,6 @@ def viterbi_decode(tag_sequence, transition_matrix, tag_observations=None,
     )
 
     if has_start_end_restriction:
-
         if allowed_end_transitions is None:
             allowed_end_transitions = torch.zeros(num_tags)
         if allowed_start_transitions is None:
